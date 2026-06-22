@@ -1,9 +1,10 @@
 import { getBearerToken, validateJWT } from "../auth";
 import { respondWithJSON } from "./json";
-import { getVideo } from "../db/videos";
+import { getVideo, updateVideo } from "../db/videos";
 import type { ApiConfig } from "../config";
 import type { BunRequest } from "bun";
-import { BadRequestError, NotFoundError } from "./errors";
+import { BadRequestError, NotFoundError, UserForbiddenError } from "./errors";
+import { getInMemoryURL } from "./assets";
 
 type Thumbnail = {
   data: ArrayBuffer;
@@ -47,7 +48,37 @@ export async function handlerUploadThumbnail(cfg: ApiConfig, req: BunRequest) {
 
   console.log("uploading thumbnail for video", videoId, "by user", userID);
 
-  // TODO: implement the upload here
+  const parseData = await req.formData()
+  const file = parseData.get("thumbnail")
+  if (!(file instanceof File)) {
+    throw new BadRequestError("Thumbnail file missing");
+  }
 
-  return respondWithJSON(200, null);
+  const fileSize = file.size
+  const MAX_UPLOAD_SIZE = 10 << 20
+  if (fileSize > MAX_UPLOAD_SIZE) {
+    throw new BadRequestError("Thumbnail size too big!")
+  }
+
+  const fileType = file.type
+  const bufferedArray = await file.arrayBuffer()
+
+  const video = getVideo(cfg.db, videoId)
+
+  if (video?.userID !== userID) {
+    throw new UserForbiddenError("Unauthorised!")
+  }
+
+  const thumbnail = {
+    data: bufferedArray,
+    mediaType: fileType
+  }
+
+  videoThumbnails.set(videoId, thumbnail) 
+  const thumbnailURL = getInMemoryURL(cfg, videoId)
+
+  video.thumbnailURL = thumbnailURL
+  updateVideo(cfg.db, video)
+
+  return respondWithJSON(200, video);
 }
