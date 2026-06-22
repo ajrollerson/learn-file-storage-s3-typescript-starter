@@ -2,9 +2,11 @@ import { getBearerToken, validateJWT } from "../auth";
 import { respondWithJSON } from "./json";
 import { getVideo, updateVideo } from "../db/videos";
 import type { ApiConfig } from "../config";
-import type { BunRequest } from "bun";
+import { pathToFileURL, type BunRequest } from "bun";
 import { BadRequestError, NotFoundError, UserForbiddenError } from "./errors";
 import { getInMemoryURL } from "./assets";
+import path from "path";
+import { randomBytes } from "crypto";
 
 type Thumbnail = {
   data: ArrayBuffer;
@@ -62,6 +64,14 @@ export async function handlerUploadThumbnail(cfg: ApiConfig, req: BunRequest) {
 
   const fileType = file.type
   const bufferedArray = await file.arrayBuffer()
+  const buffer = Buffer.from(bufferedArray)
+  const base64String = buffer.toString("base64") 
+  const base64URL = randomBytes(32).toString("base64url")
+  const dataURL = `data:${fileType};base64,${base64String}`
+
+  const uniquePath = `${base64URL}.${fileType}`
+  const filePath = path.join(cfg.assetsRoot, uniquePath)
+  Bun.write(filePath, file)
 
   const video = getVideo(cfg.db, videoId)
 
@@ -69,15 +79,7 @@ export async function handlerUploadThumbnail(cfg: ApiConfig, req: BunRequest) {
     throw new UserForbiddenError("Unauthorised!")
   }
 
-  const thumbnail = {
-    data: bufferedArray,
-    mediaType: fileType
-  }
-
-  videoThumbnails.set(videoId, thumbnail) 
-  const thumbnailURL = getInMemoryURL(cfg, videoId)
-
-  video.thumbnailURL = thumbnailURL
+  video.thumbnailURL = getInMemoryURL(cfg, uniquePath)
   updateVideo(cfg.db, video)
 
   return respondWithJSON(200, video);
